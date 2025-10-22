@@ -1,22 +1,25 @@
 #!/bin/bash
 
 # Script para ejecutar tests automáticos de trabajos enviados por estudiantes
-# Uso: ./test_submission.sh <subdirectorio> <fecha_limite> <filtro_test>
+# Uso: ./test_submission.sh <subdirectorio> <fecha_limite> <filtro_test> [branch]
 # Ejemplo: ./test_submission.sh 2025b-tp2-submissions/2025b-tp2-alendavies 2025-10-20 3B
+# Ejemplo con branch: ./test_submission.sh 2025b-tp2-submissions/2025b-tp2-alendavies 2025-10-20 3B develop
 
 set -e  # Salir si cualquier comando falla
 
-# Verificar que se proporcionaron los 3 parámetros
-if [ $# -ne 3 ]; then
-    echo "Error: Se requieren exactamente 3 parámetros"
-    echo "Uso: $0 <subdirectorio> <fecha_limite> <filtro_test>"
+# Verificar que se proporcionaron los parámetros requeridos
+if [ $# -lt 3 ] || [ $# -gt 4 ]; then
+    echo "Error: Se requieren entre 3 y 4 parámetros"
+    echo "Uso: $0 <subdirectorio> <fecha_limite> <filtro_test> [branch]"
     echo "Ejemplo: $0 2025b-tp2-submissions/2025b-tp2-alendavies 2025-10-20 3B"
+    echo "Ejemplo con branch: $0 2025b-tp2-submissions/2025b-tp2-alendavies 2025-10-20 3B develop"
     exit 1
 fi
 
 SUBDIRECTORY="$1"
 DEADLINE_DATE="$2"
 TEST_FILTER="$3"
+BRANCH="${4:-main}"  # Usar main como default si no se especifica
 
 # Validar formato de fecha (YYYY-MM-DD)
 if ! [[ $DEADLINE_DATE =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
@@ -35,6 +38,7 @@ echo "=== Ejecutando tests para submission ==="
 echo "Subdirectorio: $SUBDIRECTORY"
 echo "Fecha límite: $DEADLINE_DATE"
 echo "Filtro de test: $TEST_FILTER"
+echo "Branch: $BRANCH"
 echo ""
 
 # Posicionarse en el directorio del test
@@ -52,13 +56,29 @@ fi
 echo "2. Sincronizando con el remote..."
 git fetch --all
 
+# Verificar que el branch existe
+echo "3. Verificando que el branch '$BRANCH' existe..."
+if ! git show-ref --verify --quiet refs/heads/"$BRANCH" && ! git show-ref --verify --quiet refs/remotes/origin/"$BRANCH"; then
+    echo "Error: El branch '$BRANCH' no existe localmente ni en el remote"
+    exit 1
+fi
+
+# Descartar todos los cambios locales antes de cambiar de branch
+echo "4. Descartando cambios locales para poder cambiar de branch..."
+git reset --hard HEAD
+git clean -fd
+
+# Cambiar al branch especificado
+echo "5. Cambiando al branch '$BRANCH'..."
+git checkout "$BRANCH"
+
 # Calcular la fecha límite en formato ISO (medianoche de la fecha especificada)
 DEADLINE_ISO="${DEADLINE_DATE}T23:59:59"
 
-echo "3. Buscando el último commit antes de la medianoche de $DEADLINE_DATE..."
+echo "6. Buscando el último commit antes de la medianoche de $DEADLINE_DATE en el branch '$BRANCH'..."
 
-# Encontrar el último commit antes de la fecha límite
-LAST_COMMIT=$(git log --before="$DEADLINE_ISO" --oneline -1 --format="%H" 2>/dev/null)
+# Encontrar el último commit antes de la fecha límite en el branch especificado
+LAST_COMMIT=$(git log "$BRANCH" --before="$DEADLINE_ISO" --oneline -1 --format="%H" 2>/dev/null)
 
 if [ -z "$LAST_COMMIT" ]; then
     echo "Error: No se encontró ningún commit antes de la fecha límite $DEADLINE_DATE"
@@ -68,7 +88,9 @@ fi
 echo "   Último commit encontrado: $LAST_COMMIT"
 
 # Hacer checkout del último commit antes de la fecha límite
-echo "4. Haciendo checkout del commit $LAST_COMMIT..."
+echo "7. Haciendo checkout del commit $LAST_COMMIT..."
+echo "   Branch actual: $BRANCH"
+echo "   Fecha del commit: $(git log -1 --format='%ci' "$LAST_COMMIT")"
 git checkout "$LAST_COMMIT"
 
 # Verificar que los archivos no modificables existen
@@ -78,7 +100,7 @@ NON_MODIFIABLE_FILES=(
     "src/raft/test_test.go"
 )
 
-echo "5. Verificando archivos no modificables..."
+echo "8. Verificando archivos no modificables..."
 for file in "${NON_MODIFIABLE_FILES[@]}"; do
     if [ ! -f "$file" ]; then
         echo "Error: El archivo no modificable '$file' no existe"
@@ -87,7 +109,7 @@ for file in "${NON_MODIFIABLE_FILES[@]}"; do
 done
 
 # Hacer checkout de la primera versión de los archivos no modificables
-echo "6. Restaurando archivos no modificables a su primera versión..."
+echo "9. Restaurando archivos no modificables a su primera versión..."
 
 # Obtener el primer commit del repositorio
 FIRST_COMMIT=$(git rev-list --max-parents=0 HEAD 2>/dev/null | tail -1)
@@ -113,7 +135,7 @@ if [ ! -d "$RAFT_DIR" ]; then
 fi
 
 
-echo "7. Ejecutando tests con filtro '$TEST_FILTER'..."
+echo "10. Ejecutando tests con filtro '$TEST_FILTER'..."
 cd "$RAFT_DIR"
 
 # Ejecutar los tests con el filtro especificado
